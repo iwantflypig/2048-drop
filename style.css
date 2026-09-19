@@ -1,0 +1,158 @@
+/* 2048 Drop — 样式 */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: #faf8ef;
+  color: #776e65;
+  display: flex;
+  justify-content: center;
+  overflow-x: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+
+#app { width: 100%; max-width: 520px; padding: 10px 14px calc(16px + env(safe-area-inset-bottom)); }
+
+/* 顶部 */
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.logo { font-size: 2.4rem; font-weight: 800; line-height: 1; }
+.logo span { font-size: 0.85rem; font-weight: 700; letter-spacing: 3px; color: #f65e3b; margin-left: 6px; vertical-align: 6px; }
+.stats { display: flex; gap: 6px; }
+.stat { background: #bbada0; color: #fff; border-radius: 6px; padding: 5px 12px; text-align: center; min-width: 64px; }
+.stat .lbl { font-size: 0.58rem; font-weight: 700; letter-spacing: 1px; opacity: 0.85; }
+.stat .val { font-size: 1.15rem; font-weight: 800; }
+
+.info { display: flex; justify-content: center; gap: 18px; font-size: 0.8rem; margin-bottom: 8px; }
+.info b { font-size: 0.9rem; }
+.combo { color: #f65e3b; font-weight: 800; min-width: 64px; text-align: center; }
+
+/* 中部 */
+.mid { display: flex; gap: 8px; margin-bottom: 8px; align-items: stretch; }
+.targets { background: #bbada0; color: #fff; border-radius: 6px; padding: 6px 10px; flex: 1; }
+.targets .lbl { font-size: 0.55rem; font-weight: 700; letter-spacing: 1px; opacity: 0.8; margin-bottom: 4px; }
+.targets .list { display: flex; gap: 5px; flex-wrap: wrap; }
+.tg { font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 4px; background: rgba(255,255,255,0.18); }
+.tg.done { background: #4ec964; }
+.tg.done::before { content: "✓ "; }
+
+.next { background: #bbada0; color: #fff; border-radius: 6px; padding: 6px 12px; text-align: center; }
+.next .lbl { font-size: 0.55rem; font-weight: 700; letter-spacing: 1px; opacity: 0.8; margin-bottom: 4px; }
+#nextTile { width: 44px; height: 44px; margin: 0 auto; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.2rem; color: #776e65; background: #eee4da; }
+
+/* 游戏区 */
+#gameArea { position: relative; width: 100%; }
+#spawnStrip { height: 6px; }
+#board {
+  position: relative;
+  background: #bbada0;
+  border-radius: 8px;
+  width: 100%;
+  aspect-ratio: 8 / 14;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+}
+#cells, #tiles { position: absolute; inset: 0; }
+#cells { z-index: 1; }
+#tiles { z-index: 2; pointer-events: none; }
+#colHi { position: absolute; top: 0; background: rgba(255,255,255,0.16); display: none; z-index: 1; pointer-events: none; border-radius: 4px; }
+#danger {
+  position: absolute; left: 0; right: 0; height: 2px;
+  background: transparent; z-index: 3; pointer-events: none;
+}
+#danger.on { background: rgba(231,76,60,0.55); }
+
+.cell { position: absolute; background: #cdc1b4; border-radius: 12.5%; }
+.tileBox { position: absolute; border-radius: 12.5%; display: flex; align-items: center; justify-content: center; font-weight: 800; }
+#ghost { position: absolute; border-radius: 12.5%; background: rgba(255,255,255,0.28); border: 2px dashed rgba(255,255,255,0.55); display: none; z-index: 2; pointer-events: none; }
+#fallTile { position: absolute; border-radius: 12.5%; display: none; z-index: 4; align-items: center; justify-content: center; font-weight: 800; box-shadow: 0 5px 14px rgba(0,0,0,0.3); }
+#floor { height: 16px; line-height: 16px; text-align: center; font-size: 0.62rem; font-weight: 800; letter-spacing: 4px; color: #8f7a66; opacity: 0.55; }
+
+/* 方块颜色 */
+.c2    { background:#eee4da; color:#776e65; }
+.c4    { background:#ede0c8; color:#776e65; }
+.c8    { background:#f2b179; color:#fff; }
+.c16   { background:#f59563; color:#fff; }
+.c32   { background:#f67c5f; color:#fff; }
+.c64   { background:#f65e3b; color:#fff; }
+.c128  { background:#edcf72; color:#fff; }
+.c256  { background:#edcc61; color:#fff; }
+.c16384, .c8192, .c4096, .c2048 { background:#edc22e; color:#fff; }
+.c1024 { background:#edc53f; color:#fff; }
+.csuper{ background:#3c3a32; color:#fff; }
+
+/* 触屏 / 按钮 */
+.touchpad { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
+.touchpad button, .controls button, .overlay .big {
+  background: #8f7a66; color: #fff; border: none; border-radius: 6px;
+  padding: 10px 18px; font-size: 0.85rem; font-weight: 700; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.touchpad button:active, .controls button:active, .overlay .big:active { transform: scale(0.95); opacity: 0.85; }
+.touchpad #btnDrop { padding: 10px 30px; background: #f65e3b; }
+.controls { display: flex; justify-content: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.controls button { min-width: 44px; }
+.help { text-align: center; font-size: 0.68rem; opacity: 0.55; margin-top: 10px; }
+
+/* 弹层 */
+.overlay {
+  position: fixed; inset: 0; background: rgba(250,248,239,0.94);
+  display: none; align-items: center; justify-content: center; z-index: 100;
+}
+.overlay.on { display: flex; }
+.panel { text-align: center; padding: 26px; }
+.panel h2 { font-size: 2rem; margin-bottom: 14px; }
+.panel p { margin-bottom: 10px; }
+.finals { margin-bottom: 16px; font-size: 1rem; }
+.finals b { font-size: 1.3rem; color: #f65e3b; }
+.overlay .big { display: block; width: 200px; margin: 8px auto; padding: 12px; font-size: 1rem; }
+
+/* 弹出提示 */
+#popup {
+  position: fixed; top: 42%; left: 50%; transform: translate(-50%,-50%) scale(0.6);
+  background: rgba(60,58,50,0.92); color: #fff; padding: 16px 34px; border-radius: 12px;
+  font-size: 1.7rem; font-weight: 800; z-index: 200; opacity: 0; pointer-events: none;
+  transition: transform .25s, opacity .25s;
+}
+#popup.on { transform: translate(-50%,-50%) scale(1); opacity: 1; }
+#comboPop {
+  position: fixed; top: 30%; left: 50%; transform: translate(-50%,-50%);
+  color: #f65e3b; font-size: 2.2rem; font-weight: 800; z-index: 200; opacity: 0; pointer-events: none;
+  text-shadow: 0 0 18px rgba(246,94,59,0.45);
+}
+#comboPop.on { animation: comboAnim 0.9s ease forwards; }
+
+@keyframes comboAnim {
+  0% { opacity: 0; transform: translate(-50%,-50%) scale(0.4); }
+  25% { opacity: 1; transform: translate(-50%,-50%) scale(1.25); }
+  45% { transform: translate(-50%,-50%) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%,-60%) scale(0.8); }
+}
+@keyframes landAnim {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.08, 0.88); }
+  100% { transform: scale(1); }
+}
+@keyframes mergeAnim {
+  0% { transform: scale(0.6); }
+  55% { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+.land { animation: landAnim .22s ease; }
+.merge { animation: mergeAnim .3s ease; }
+.willMerge { outline: 3px solid rgba(255,255,255,0.85); outline-offset: -3px; }
+.absorbed { transition: transform .13s ease-in, opacity .13s ease-in; transform: scale(0.55); opacity: 0.25; }
+
+@media (max-width: 480px) {
+  #app { padding: 8px 8px calc(12px + env(safe-area-inset-bottom)); }
+  .logo { font-size: 1.9rem; }
+  .stat { min-width: 56px; padding: 4px 8px; }
+  .stat .val { font-size: 1rem; }
+  .info { font-size: 0.72rem; gap: 12px; }
+  #nextTile { width: 38px; height: 38px; font-size: 1.05rem; }
+  .touchpad button { padding: 12px 16px; }
+}
