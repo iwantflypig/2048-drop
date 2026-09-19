@@ -181,75 +181,55 @@
     return el;
   }
 
-  /* ===== 智能数字生成（盘面分析 + 渐进难度 + 随机性）===== */
+  /* ===== 智能数字生成（难度渐进 + 盘面分析 + 随机性）===== */
   function genTile() {
-    // 收集盘面信息
-    var counts = {}, totalTiles = 0;
+    // 1. 统计盘面数字分布
+    var counts = {};
     for (var r = 0; r < ROWS; r++) {
       for (var c = 0; c < COLS; c++) {
         if (board[r][c]) {
           counts[board[r][c].v] = (counts[board[r][c].v] || 0) + 1;
-          totalTiles++;
         }
       }
     }
 
-    // 确定可生成的数字范围（随最高数字渐进解锁）
-    var candidates = [2, 4];                 // 始终可生成
-    if (maxTile >= 32)  candidates.push(8);
-    if (maxTile >= 128) candidates.push(16);
-    if (maxTile >= 256) candidates.push(32);
-    if (maxTile >= 512) candidates.push(64);
+    // 2. 确定难度值和候选数字
+    var difficulty = Math.log2(maxTile + 4);  // maxTile=0→2, maxTile=8→3.3, maxTile=32→5.1, maxTile=128→7
+    var maxLevel = Math.ceil(difficulty);     // 最大数字的幂次
 
-    // 基础概率分布：2 始终最高，但整体曲线更陡（难度更高）
-    // 随 maxTile 增大，概率曲线右移更快（大数字更早变多）
-    var baseWeights = { 2: 35, 4: 28, 8: 18, 16: 12, 32: 5, 64: 2 };
-
-    // 根据 maxTile 调整：越高则大数字基础权重越大（更早解锁大数字）
-    var shift = 0;
-    if (maxTile >= 32)  shift = 1;   // 32就提前解锁8的权重
-    if (maxTile >= 64)  shift = 2;
-    if (maxTile >= 128) shift = 3;
-    if (maxTile >= 256) shift = 4;
-    if (maxTile >= 512) shift = 5;
-
-    var weights = {};
-    for (var i = 0; i < candidates.length; i++) {
-      var v = candidates[i];
-      var w = baseWeights[v] || 1;
-
-      // 进度越高，大数字权重提升
-      var idx = candidates.indexOf(v);
-      w = Math.max(1, w + (idx - 0) * shift * 2);
-
-      // 盘面影响（轻度）：如果这个数字在盘面上存在，小幅提升概率
-      // 使用平方根抑制，避免某个数字过多时完全垄断
-      if (counts[v]) {
-        w += Math.sqrt(counts[v]) * 3;  // 平方根抑制：2个+4.2，4个+6，8个+8.5
-      }
-
-      // 连锁激励：盘面上恰好有 2 个相邻可能时，略微提升
-      // （但不强制，保持随机性）
-      if (counts[v] >= 2 && counts[v] <= 4) {
-        w *= 1.2;
-      }
-
-      // 2 的数字永远不低于 30%，保证游戏可玩性
-      if (v === 2) w = Math.max(w, 30);
-
-      weights[v] = w;
+    var candidates = [];
+    for (var level = 1; level <= maxLevel; level++) {
+      candidates.push(Math.pow(2, level));
     }
 
-    // 加权随机选择
+    // 3. 计算每个候选的权重
     var totalW = 0;
-    for (var v in weights) totalW += weights[v];
+    var weights = [];
 
+    for (var i = 0; i < candidates.length; i++) {
+      var cand = candidates[i];
+      var level = i + 1;  // 2→1, 4→2, 8→3, 16→4, 32→5...
+
+      // 核心：权重 = 难度 - 级别 + 1（数字越大权重越低但不为0）
+      var w = Math.max(1, difficulty - level + 1);
+
+      // 盘面修正
+      if (counts[cand] >= 2) w *= 1.4;   // 有合并潜力，提升
+      if (counts[cand] >= 4) w *= 0.5;   // 过多堆积，抑制
+
+      // 链条修正：盘面有 cand*2 时，说明玩家在构建大数字，多出 cand
+      if (cand >= 4 && counts[cand * 2] >= 1) w *= 1.5;
+
+      weights[i] = w;
+      totalW += w;
+    }
+
+    // 4. 加权随机选择
     var r = Math.random() * totalW;
     var cum = 0;
     for (var i = 0; i < candidates.length; i++) {
-      var v = candidates[i];
-      cum += weights[v];
-      if (r <= cum) return v;
+      cum += weights[i];
+      if (r <= cum) return candidates[i];
     }
 
     return 2; // 兜底
