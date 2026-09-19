@@ -573,7 +573,7 @@
     lastT = t;
     if (phase === 'falling' && curTile) {
       var rowPx = M.ch + M.gap;
-      var speed = rowPx / (softDrop ? SOFT_MS : FALL_MS);   // px / ms
+      var speed = 1 / (softDrop ? SOFT_MS : FALL_MS);   // 行/毫秒（fy 是行索引）
       fy += speed * dt;
 
       // 计算当前列的最终停靠行 R（列已沉降，无空洞）
