@@ -460,37 +460,52 @@
     return group;
   }
 
-  /* ===== 落地 → 合并所有相邻相同数字 → 继续连锁 ===== */
+  /* ===== 落地 → 全盘扫描合并所有相邻相同数字 → 无限连锁 ===== */
   function mergeChain(row, col, t, id) {
     var chain = 0, gained = 0;
 
+    // 全盘扫描：找到任意一个相邻相同数字的组
+    function findAnyGroup() {
+      var visited = {};
+      for (var r = 0; r < ROWS; r++) {
+        for (var c = 0; c < COLS; c++) {
+          if (visited[r + ',' + c] || !board[r][c]) continue;
+          var group = findGroup(r, c, board[r][c].v);
+          if (group.length >= 2) return group;
+          for (var i = 0; i < group.length; i++) visited[group[i].r + ',' + group[i].c] = true;
+        }
+      }
+      return null;
+    }
+
     function step() {
       if (!alive(id)) return Promise.resolve();
-      var group = findGroup(row, col, t.v);
-      if (group.length < 2) return Promise.resolve();
+      var group = findAnyGroup();
+      if (!group) return Promise.resolve();
 
+      // 以第一个方块为中心合并
+      var center = group[0];
+      var t = board[center.r][center.c];
       var count = group.length;
       var newVal = t.v * Math.pow(2, count - 1);
       var mergeGain = t.v * (Math.pow(2, count) - 2);
       var colsAffected = {};
       for (var i = 0; i < group.length; i++) colsAffected[group[i].c] = true;
 
-      // 收集非中心方块的引用和坐标（动画前获取，避免被覆盖后丢失）
       var absorbed = [];
       for (var i = 0; i < group.length; i++) {
         var g = group[i];
-        if (g.r === row && g.c === col) continue;
+        if (g.r === center.r && g.c === center.c) continue;
         absorbed.push({r: g.r, c: g.c, obj: board[g.r][g.c]});
       }
 
-      // 动画：非中心方块滑向中心并消失
       for (var i = 0; i < absorbed.length; i++) {
         var other = absorbed[i];
         board[other.r][other.c] = null;
         if (other.obj && other.obj.el) {
           other.obj.el.classList.add('absorbed');
           other.obj.el.style.transition = 'all 130ms ease-in';
-          setBox(other.obj.el, rect(row, col));
+          setBox(other.obj.el, rect(center.r, center.c));
         }
       }
 
@@ -501,16 +516,15 @@
 
       return delay(180).then(function () {
         if (!alive(id)) return;
-        // 清除被吸收的 DOM
         for (var i = 0; i < absorbed.length; i++) {
           if (absorbed[i].obj && absorbed[i].obj.el) absorbed[i].obj.el.remove();
         }
 
         t.v = newVal;
-        board[row][col] = t;
+        board[center.r][center.c] = t;
         refreshTileEl(t);
         t.el.style.transition = 'none';
-        setBox(t.el, rect(row, col));
+        setBox(t.el, rect(center.r, center.c));
         void t.el.offsetWidth;
         t.el.classList.add('merge');
         setTimeout(function () { if (alive(id)) t.el.classList.remove('merge'); }, 260 * SPEED);
@@ -520,15 +534,7 @@
         playSound('merge');
 
         for (var c in colsAffected) settleColAnim(c);
-        return delay(160).then(function () {
-          // 重力沉降后 t 的位置可能变了，重新定位
-          for (var r2 = 0; r2 < ROWS; r2++) {
-            for (var c2 = 0; c2 < COLS; c2++) {
-              if (board[r2][c2] === t) { row = r2; col = c2; break; }
-            }
-          }
-          step();
-        });
+        return delay(160).then(step);  // 全盘扫描继续连锁
       });
     }
 
