@@ -588,11 +588,8 @@
     renderNext();
     updateHUD();
     if (checkGameOver()) { endGame(); return; }
-    // 新数字在顶部停留一段时间，等合并动画完全结束后再开始下落
-    setTimeout(function () {
-      phase = 'falling';
-      placeFall(true);
-    }, 300);
+    phase = 'falling';
+    placeFall(true);
     saveGame();
   }
 
