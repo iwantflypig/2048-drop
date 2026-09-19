@@ -9,11 +9,11 @@
   'use strict';
 
   /* ===== 常量 ===== */
-  var ROWS = 8;
+  var ROWS = 7;
   var COLS = 8;
   var TARGETS = [128, 256, 512, 1024, 2048, 4096, 8192];
-  var FALL_MS = 1800;     // 自动下落一格（从容节奏）
-  var SOFT_MS = 220;      // 按住↓加速（≈8倍速）
+  var FALL_MS = 250;      // 自动下落一格（像一直按着↓键）
+  var SOFT_MS = 180;      // 按住↓加速（比自动稍快）
   var SAVE_KEY = 'drop2048.save';
   var BEST_KEY = 'drop2048.best';
   var START_COL = 3;
@@ -714,15 +714,18 @@
     board = [];
     for (var r = 0; r < ROWS; r++) board.push(new Array(COLS).fill(null));
 
-    metrics();
-    renderCells();
-    positionDanger();
-    updateHUD();
-    renderNext();
+    // 确保 DOM 布局完成后再初始化，避免尺寸为 0 导致游戏无法启动
+    requestAnimationFrame(function () {
+      metrics();
+      renderCells();
+      positionDanger();
+      updateHUD();
+      renderNext();
 
-    if (!tryResume()) newGame();
-    bindEvents();
-    requestAnimationFrame(frame);
+      if (!tryResume()) newGame();
+      bindEvents();
+      requestAnimationFrame(frame);
+    });
   }
 
   if (document.readyState === 'loading') {
