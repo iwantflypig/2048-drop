@@ -9,11 +9,11 @@
   'use strict';
 
   /* ===== 常量 ===== */
-  var ROWS = 12;
+  var ROWS = 8;
   var COLS = 8;
   var TARGETS = [128, 256, 512, 1024, 2048, 4096, 8192];
-  var FALL_MS = 1300;     // 自动下落一格（从容节奏，有足够时间思考）
-  var SOFT_MS = 140;      // 按住↓加速（按住≈9倍速，松手恢复）
+  var FALL_MS = 1800;     // 自动下落一格（从容节奏）
+  var SOFT_MS = 220;      // 按住↓加速（≈8倍速）
   var SAVE_KEY = 'drop2048.save';
   var BEST_KEY = 'drop2048.best';
   var START_COL = 3;
@@ -36,7 +36,7 @@
   /* ===== DOM ===== */
   function $(id) { return document.getElementById(id); }
   var boardEl, cellsEl, tilesEl, ghostEl, fallEl, dangerEl, colHiEl;
-  var scoreEl, bestEl, maxEl, movesEl, mergesEl, comboEl, nextEl, targetsEl;
+  var scoreEl, bestEl, maxEl, movesEl, mergesEl, comboEl, nextEl;
   var popupEl, comboPopEl, pauseOv, overOv;
 
   /* ===== 工具 ===== */
@@ -129,17 +129,6 @@
         setBox(d, rect(r, c));
         cellsEl.appendChild(d);
       }
-    }
-  }
-
-  function renderTargets() {
-    targetsEl.innerHTML = '';
-    for (var i = 0; i < TARGETS.length; i++) {
-      var t = TARGETS[i];
-      var d = document.createElement('span');
-      d.className = 'tg' + (reached[t] ? ' done' : '');
-      d.textContent = t;
-      targetsEl.appendChild(d);
     }
   }
 
@@ -399,12 +388,8 @@
   }
 
   function onMaxTile(v) {
-    if (TARGETS.indexOf(v) >= 0 && !reached[v]) {
-      reached[v] = true;
-      renderTargets();
-      popup('NEW TILE! ' + v);
-    }
-    if (v >= 2048 && !reached['2048']) {
+    if (v >= 128) popup('NEW TILE! ' + v);
+    if (v === 2048 && !reached['2048']) {
       reached['2048'] = true;
       popup('2048 REACHED!');
     }
@@ -480,7 +465,6 @@
     pauseOv.classList.remove('on');
     overOv.classList.remove('on');
     comboEl.textContent = '';
-    renderTargets();
     updateHUD();
     renderNext();
     fc = START_COL;
@@ -534,7 +518,6 @@
     newTileEl(curTile, 0, fc);
     phase = 'falling';
     lastChainTick = Date.now();
-    renderTargets();
     renderNext();
     updateHUD();
     updateDanger();
@@ -722,7 +705,7 @@
     ghostEl = $('ghost'); fallEl = $('fallTile'); dangerEl = $('danger'); colHiEl = $('colHi');
     scoreEl = $('score'); bestEl = $('best'); maxEl = $('maxTile');
     movesEl = $('moves'); mergesEl = $('merges'); comboEl = $('combo');
-    nextEl = $('nextTile'); targetsEl = $('targets');
+    nextEl = $('nextTile');
     popupEl = $('popup'); comboPopEl = $('comboPop');
     pauseOv = $('pauseOverlay'); overOv = $('overOverlay');
 
@@ -734,7 +717,6 @@
     metrics();
     renderCells();
     positionDanger();
-    renderTargets();
     updateHUD();
     renderNext();
 
