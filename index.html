@@ -10,10 +10,9 @@
 <div id="app">
   <header class="header">
     <div class="logo">2048<span>Drop</span></div>
-    <div class="stats">
-      <div class="stat"><div class="lbl">SCORE</div><div class="val" id="score">0</div></div>
-      <div class="stat"><div class="lbl">BEST</div><div class="val" id="best">0</div></div>
-      <div class="stat"><div class="lbl">MAX</div><div class="val" id="maxTile">-</div></div>
+    <div class="next">
+      <div class="lbl">NEXT</div>
+      <div id="nextTile">2</div>
     </div>
   </header>
 
@@ -23,15 +22,13 @@
     <span id="combo" class="combo"></span>
   </div>
 
-  <div class="mid">
-    <div class="next">
-      <div class="lbl">NEXT</div>
-      <div id="nextTile">2</div>
-    </div>
+  <div class="stats">
+    <div class="stat"><div class="lbl">SCORE</div><div class="val" id="score">0</div></div>
+    <div class="stat"><div class="lbl">BEST</div><div class="val" id="best">0</div></div>
+    <div class="stat"><div class="lbl">MAX</div><div class="val" id="maxTile">-</div></div>
   </div>
 
-    <div id="gameArea">
-    <div id="spawnStrip"></div>
+  <div id="gameArea">
     <div id="board">
       <div id="cells"></div>
       <div id="tiles"></div>
@@ -40,31 +37,14 @@
       <div id="fallTile"></div>
       <div id="danger"></div>
     </div>
-    <div id="floor">FLOOR</div>
-  </div>
-
-  <div class="touchpad">
-    <button id="btnLeft">&#9664;</button>
-    <button id="btnSoft">&#9660;</button>
-    <button id="btnDrop">DROP</button>
-    <button id="btnRight">&#9654;</button>
   </div>
 
   <div class="controls">
-    <button id="btnPause">&#10074;&#10074; 暂停</button>
+    <button id="btnLeft">&#9664;</button>
+    <button id="btnSoft">&#9660;</button>
+    <button id="btnRight">&#9654;</button>
     <button id="btnNew">新游戏</button>
-    <button id="btnZoomOut">&minus;</button>
-    <button id="btnZoomIn">+</button>
-  </div>
-
-  <div class="help">←→ 移动 &nbsp; ↓ 加速 &nbsp; 空格 直落 &nbsp; 1-8 选列 &nbsp; P 暂停 &nbsp; N 新游戏</div>
-
-  <div class="overlay" id="pauseOverlay">
-    <div class="panel">
-      <h2>已暂停</h2>
-      <button class="big" id="btnResume">继续</button>
-      <button class="big" id="btnPauseNew">新游戏</button>
-    </div>
+    <button id="soundBtn">🔊</button>
   </div>
 
   <div class="overlay" id="overOverlay">

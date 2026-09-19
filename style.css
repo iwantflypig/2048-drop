@@ -46,7 +46,7 @@ body {
   background: #bbada0;
   border-radius: 8px;
   width: 100%;
-  aspect-ratio: 8 / 7;
+  aspect-ratio: 1 / 1;
   box-shadow: 0 6px 18px rgba(0,0,0,0.15);
 }
 #cells, #tiles { position: absolute; inset: 0; }
@@ -78,17 +78,15 @@ body {
 .c1024 { background:#edc53f; color:#fff; }
 .csuper{ background:#3c3a32; color:#fff; }
 
-/* 触屏 / 按钮 */
-.touchpad { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
-.touchpad button, .controls button, .overlay .big {
+/* 按钮 */
+.controls { display: flex; justify-content: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.controls button, .overlay .big {
   background: #8f7a66; color: #fff; border: none; border-radius: 6px;
-  padding: 10px 18px; font-size: 0.85rem; font-weight: 700; cursor: pointer;
+  padding: 10px 16px; font-size: 0.82rem; font-weight: 700; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.touchpad button:active, .controls button:active, .overlay .big:active { transform: scale(0.95); opacity: 0.85; }
-.touchpad #btnDrop { padding: 10px 30px; background: #f65e3b; }
-.controls { display: flex; justify-content: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.controls button { min-width: 44px; }
+.controls button:active, .overlay .big:active { transform: scale(0.95); opacity: 0.85; }
+.controls button { min-width: 40px; }
 .help { text-align: center; font-size: 0.6rem; opacity: 0.5; margin-top: 6px; line-height: 1.4; }
 
 /* 弹层 */

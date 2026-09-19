@@ -9,15 +9,67 @@
   'use strict';
 
   /* ===== 常量 ===== */
-  var ROWS = 7;
+  var ROWS = 8;
   var COLS = 8;
   var TARGETS = [128, 256, 512, 1024, 2048, 4096, 8192];
-  var FALL_MS = 800;      // 自动下落一格（从容节奏）
-  var SOFT_MS = 120;      // 按住↓加速（≈6倍速）
+  var FALL_MS = 600;      // 自动下落一格
+  var SOFT_MS = 90;       // 按住↓加速（≈7倍速）
   var SAVE_KEY = 'drop2048.save';
   var BEST_KEY = 'drop2048.best';
   var START_COL = 3;      // 始终在第4列（中间列）生成
   var SPEED = 1;          // 动画速度倍率（测试时可调快）
+  var soundOn = true;     // 音效开关
+
+  /* ===== 音效系统（Web Audio API，无需外部文件）===== */
+  var audioCtx = null;
+  var musicTimer = null;
+  var musicNote = 0;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  function beep(freq, dur, vol, type) {
+    if (!soundOn) return;
+    try {
+      var ctx = ensureAudio();
+      if (!ctx) return;
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(vol || 0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + dur);
+    } catch(e) { /* ignore audio errors in test env */ }
+  }
+  function playSound(type) {
+    if (!soundOn) return;
+    if (type === 'merge') beep(523 + Math.random()*200, 0.12, 0.1, 'triangle');
+    else if (type === 'drop') beep(220, 0.08, 0.06, 'sine');
+    else if (type === 'over') { beep(200,0.3,0.15,'sawtooth'); setTimeout(function(){beep(150,0.4,0.12,'sawtooth');},200); }
+  }
+  var musicNotes = [262,294,330,349,392,349,330,294];
+  function startMusic() {
+    stopMusic();
+    if (!soundOn) return;
+    ensureAudio();
+    musicNote = 0;
+    musicTimer = setInterval(function () {
+      if (!soundOn) { stopMusic(); return; }
+      beep(musicNotes[musicNote % musicNotes.length], 0.25, 0.04, 'sine');
+      musicNote++;
+    }, 350);
+  }
+  function stopMusic() { if (musicTimer) { clearInterval(musicTimer); musicTimer = null; } }
+  function toggleSound() {
+    soundOn = !soundOn;
+    $('soundBtn').textContent = soundOn ? '🔊' : '🔇';
+    if (soundOn) startMusic(); else stopMusic();
+  }
 
   /* ===== 状态 ===== */
   var board = [];         // 每格: null 或 {v, el}
@@ -37,7 +89,7 @@
   function $(id) { return document.getElementById(id); }
   var boardEl, cellsEl, tilesEl, ghostEl, fallEl, dangerEl, colHiEl;
   var scoreEl, bestEl, maxEl, movesEl, mergesEl, comboEl, nextEl;
-  var popupEl, comboPopEl, pauseOv, overOv;
+  var popupEl, comboPopEl, overOv;
 
   /* ===== 工具 ===== */
   function delay(ms) { return new Promise(function (r) { setTimeout(r, ms * SPEED); }); }
@@ -276,7 +328,9 @@
       el.classList.add('land');
       setTimeout(function () { if (alive(id)) el.classList.remove('land'); }, 220 * SPEED);
     } else {
-      // 满列合并进入：贴在顶行目标方块上（逻辑位置 row=-1）
+      // 满列合并进入：t 贴在顶行，与顶行方块重叠并合并
+      board[0][col] = t;
+      row = 0;
       el.style.transition = 'none';
       el.style.zIndex = 6;
       setBox(el, rect(0, col));
@@ -302,52 +356,73 @@
     }
   }
 
+  // 找到所有相邻的相同数字（4方向洪水填充）
+  function findGroup(r, c, val) {
+    var group = [], visited = {}, q = [{r:r,c:c}];
+    visited[r+','+c] = true;
+    while (q.length) {
+      var cur = q.shift();
+      group.push(cur);
+      var dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+      for (var i = 0; i < 4; i++) {
+        var nr = cur.r+dirs[i][0], nc = cur.c+dirs[i][1];
+        if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS && !visited[nr+','+nc]) {
+          var n = board[nr][nc];
+          if (n && n.v === val) { visited[nr+','+nc] = true; q.push({r:nr,c:nc}); }
+        }
+      }
+    }
+    return group;
+  }
+
+  /* ===== 落地 → 合并所有相邻相同数字 → 继续连锁 ===== */
   function mergeChain(row, col, t, id) {
     var chain = 0, gained = 0;
 
-    function neighbor(r, c) {
-      if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return null;
-      var n = board[r][c];
-      return (n && n.v === t.v) ? n : null;
-    }
-
     function step() {
       if (!alive(id)) return Promise.resolve();
+      var group = findGroup(row, col, t.v);
+      if (group.length < 2) return Promise.resolve();
 
-      // 找可合并方向：优先级 下 > 左 > 右
-      var dir = null, target = null;
-      var below = neighbor(row + 1, col);
-      if (below) { dir = 'down'; target = below; }
-      else if (row >= 0) {
-        var left = neighbor(row, col - 1);
-        if (left) { dir = 'left'; target = left; }
-        else {
-          var right = neighbor(row, col + 1);
-          if (right) { dir = 'right'; target = right; }
+      var count = group.length;
+      var newVal = t.v * Math.pow(2, count - 1);
+      var mergeGain = t.v * (Math.pow(2, count) - 2);
+      var colsAffected = {};
+      for (var i = 0; i < group.length; i++) colsAffected[group[i].c] = true;
+
+      // 收集非中心方块的引用和坐标（动画前获取，避免被覆盖后丢失）
+      var absorbed = [];
+      for (var i = 0; i < group.length; i++) {
+        var g = group[i];
+        if (g.r === row && g.c === col) continue;
+        absorbed.push({r: g.r, c: g.c, obj: board[g.r][g.c]});
+      }
+
+      // 动画：非中心方块滑向中心并消失
+      for (var i = 0; i < absorbed.length; i++) {
+        var other = absorbed[i];
+        board[other.r][other.c] = null;
+        if (other.obj && other.obj.el) {
+          other.obj.el.classList.add('absorbed');
+          other.obj.el.style.transition = 'all 130ms ease-in';
+          setBox(other.obj.el, rect(row, col));
         }
       }
-      if (!dir) return Promise.resolve();
 
-      // 吃掉 target：t 滑到 target 位置，target 缩小消失
-      if (row >= 0) board[row][col] = null;
-      var tEl = target.el;
-      tEl.classList.add('absorbed');
-      t.el.style.transition = (dir === 'down') ? 'top 130ms ease-in' : 'left 130ms ease-in';
-      var nRow = (dir === 'down') ? row + 1 : row;
-      var nCol = (dir === 'left') ? col - 1 : (dir === 'right') ? col + 1 : col;
-      setBox(t.el, rect(nRow, nCol));
-      board[nRow][nCol] = t;
-      var vacatedCol = col;
-      row = nRow; col = nCol;
+      gained += mergeGain;
+      merges += count - 1;
+      chain++;
+      lastChainTick = Date.now();
 
-      return delay(135).then(function () {
+      return delay(180).then(function () {
         if (!alive(id)) return;
-        lastChainTick = Date.now();     // 心跳：看门狗据此判断链还活着
-        tEl.remove();
-        t.v = t.v * 2;
-        gained += t.v;
-        merges++;
-        chain++;
+        // 清除被吸收的 DOM
+        for (var i = 0; i < absorbed.length; i++) {
+          if (absorbed[i].obj && absorbed[i].obj.el) absorbed[i].obj.el.remove();
+        }
+
+        t.v = newVal;
+        board[row][col] = t;
         refreshTileEl(t);
         t.el.style.transition = 'none';
         setBox(t.el, rect(row, col));
@@ -357,12 +432,18 @@
         if (t.v > maxTile) { maxTile = t.v; onMaxTile(t.v); }
         updateHUD();
         updateDanger();
+        playSound('merge');
 
-        // 每次吃子后，离开的列都做重力沉降（幂等，无悬空则无变化）。
-        // 场景：t 横吃后，被吃目标的上方方块压在 t 上；t 再向下吃时它们就悬空了。
-        settleColAnim(vacatedCol);
-        var settleP = delay(160);
-        return settleP.then(function () { return delay(140).then(step); });
+        for (var c in colsAffected) settleColAnim(c);
+        return delay(160).then(function () {
+          // 重力沉降后 t 的位置可能变了，重新定位
+          for (var r2 = 0; r2 < ROWS; r2++) {
+            for (var c2 = 0; c2 < COLS; c2++) {
+              if (board[r2][c2] === t) { row = r2; col = c2; break; }
+            }
+          }
+          step();
+        });
       });
     }
 
@@ -439,13 +520,13 @@
     if (curTile && curTile.el) curTile.el.style.display = 'none';
     curTile = null;
     ghostEl.style.display = 'none';
+    stopMusic();
+    playSound('over');
     if (score > best) { best = score; store.set(BEST_KEY, String(best)); }
     $('finalScore').textContent = score;
     $('finalMax').textContent = maxTile;
     $('overTitle').textContent = reached['2048'] ? '2048 已达成' : 'GAME OVER';
     $('overMsg').textContent = '没有可以落入的列了';
-    // 结束提示必须可见：清掉暂停层再弹结束层
-    pauseOv.classList.remove('on');
     overOv.classList.add('on');
     updateHUD();
     store.del(SAVE_KEY);
@@ -462,8 +543,7 @@
     cur = genTile();
     next = genTile();
     softDrop = false;
-    pauseOv.classList.remove('on');
-    overOv.classList.remove('on');
+549|    overOv.classList.remove('on');
     comboEl.textContent = '';
     updateHUD();
     renderNext();
@@ -536,26 +616,6 @@
     } catch (e) { return false; }
   }
 
-  /* ===== 暂停 ===== */
-  function pauseGame() {
-    if (phase !== 'falling') return;
-    phase = 'paused';
-    pauseOv.classList.add('on');
-    if (curTile && curTile.el) curTile.el.style.visibility = 'hidden';
-    ghostEl.style.display = 'none';
-  }
-  function resumeGame() {
-    if (phase !== 'paused') return;
-    phase = 'falling';
-    pauseOv.classList.remove('on');
-    if (curTile && curTile.el) curTile.el.style.visibility = 'visible';
-    placeFall(true);
-  }
-  function togglePause() {
-    if (phase === 'paused') resumeGame();
-    else pauseGame();
-  }
-
   /* ===== 缩放 ===== */
   function applyZoom() {
     boardEl.style.transform = 'scale(' + zoom + ')';
@@ -592,7 +652,7 @@
     } else if (phase === 'resolving') {
       // 看门狗：合并链心跳超时（异常中断/卡死）→ 强制走完流程，
       // 保证游戏不会无提示地卡在 resolving
-      if (Date.now() - lastChainTick > 4000 / SPEED) {
+      if (Date.now() - lastChainTick > 2500) {
         console.warn('merge chain watchdog fired, forcing recovery');
         runId++;                       // 掐掉所有挂起的链回调
         if (checkGameOver()) { endGame(); }
@@ -658,19 +718,12 @@
     press('btnLeft', function () { moveH(-1); });
     press('btnRight', function () { moveH(1); });
     press('btnSoft', function () { softDrop = true; }, function () { softDrop = false; });
-    press('btnDrop', function () { hardDrop(); });
-
-    $('btnPause').addEventListener('click', togglePause);
     $('btnNew').addEventListener('click', newGame);
-    $('btnResume').addEventListener('click', resumeGame);
-    $('btnPauseNew').addEventListener('click', newGame);
+    $('soundBtn').addEventListener('click', toggleSound);
     $('btnOverNew').addEventListener('click', newGame);
-    $('btnZoomIn').addEventListener('click', zoomIn);
-    $('btnZoomOut').addEventListener('click', zoomOut);
 
     window.addEventListener('resize', relayout);
     document.addEventListener('visibilitychange', function () {
-      if (document.hidden && phase === 'falling') pauseGame();
     });
   }
 
@@ -707,7 +760,7 @@
     movesEl = $('moves'); mergesEl = $('merges'); comboEl = $('combo');
     nextEl = $('nextTile');
     popupEl = $('popup'); comboPopEl = $('comboPop');
-    pauseOv = $('pauseOverlay'); overOv = $('overOverlay');
+    overOv = $('overOverlay');
 
     best = parseInt(store.get(BEST_KEY) || '0', 10) || 0;
 
@@ -723,6 +776,7 @@
       renderNext();
 
       if (!tryResume()) newGame();
+      startMusic();
       bindEvents();
       requestAnimationFrame(frame);
     });
@@ -741,8 +795,6 @@
     moveLeft: function () { moveH(-1); },
     moveRight: function () { moveH(1); },
     dropIntoColumn: dropIntoColumn,
-    pause: pauseGame,
-    resume: resumeGame,
     _setSpeed: function (s) { SPEED = s; },
     _load: function (state) { return loadState(state); },
     get board() {
