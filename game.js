@@ -10,13 +10,13 @@
 
   /* ===== 常量 ===== */
   var ROWS = 8;
-  var COLS = 8;
+  var COLS = 7;
   var TARGETS = [128, 256, 512, 1024, 2048, 4096, 8192];
   var FALL_MS = 600;      // 自动下落一格
   var SOFT_MS = 90;       // 按住↓加速（≈7倍速）
   var SAVE_KEY = 'drop2048.save';
   var BEST_KEY = 'drop2048.best';
-  var START_COL = 3;      // 始终在第4列（中间列）生成
+  var START_COL = 3;      // 始终在中间列生成
   var SPEED = 1;          // 动画速度倍率（测试时可调快）
   var soundOn = true;     // 音效开关
 
@@ -53,22 +53,43 @@
     else if (type === 'over') { beep(200,0.3,0.15,'sawtooth'); setTimeout(function(){beep(150,0.4,0.12,'sawtooth');},200); }
   }
   var musicNotes = [262,294,330,349,392,349,330,294];
+  var musicGain = null;
+  var musicOsc = null;
   function startMusic() {
     stopMusic();
     if (!soundOn) return;
-    ensureAudio();
-    musicNote = 0;
-    musicTimer = setInterval(function () {
-      if (!soundOn) { stopMusic(); return; }
-      beep(musicNotes[musicNote % musicNotes.length], 0.25, 0.04, 'sine');
-      musicNote++;
-    }, 350);
+    try {
+      var ctx = ensureAudio();
+      if (!ctx) return;
+      musicGain = ctx.createGain();
+      musicGain.gain.value = 0.03;
+      musicGain.connect(ctx.destination);
+      musicOsc = ctx.createOscillator();
+      musicOsc.type = 'sine';
+      musicOsc.connect(musicGain);
+      musicOsc.start();
+      musicNote = 0;
+      musicTimer = setInterval(function () {
+        if (!soundOn || !musicOsc) { stopMusic(); return; }
+        musicOsc.frequency.setValueAtTime(musicNotes[musicNote % musicNotes.length], ctx.currentTime);
+        musicNote++;
+      }, 400);
+    } catch(e) { /* ignore */ }
   }
-  function stopMusic() { if (musicTimer) { clearInterval(musicTimer); musicTimer = null; } }
+  function stopMusic() {
+    if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+    if (musicOsc) { try { musicOsc.stop(); } catch(e){} musicOsc = null; }
+    musicGain = null;
+  }
   function toggleSound() {
     soundOn = !soundOn;
     $('soundBtn').textContent = soundOn ? '🔊' : '🔇';
+    try { localStorage.setItem('drop2048.sound', soundOn ? '1' : '0'); } catch(e){}
     if (soundOn) startMusic(); else stopMusic();
+  }
+  function resumeAudioOnGesture() {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    if (soundOn && !musicOsc) startMusic();
   }
 
   /* ===== 状态 ===== */
@@ -160,14 +181,78 @@
     return el;
   }
 
-  /* ===== 数字生成 ===== */
+  /* ===== 智能数字生成（盘面分析 + 渐进难度 + 随机性）===== */
   function genTile() {
-    var p4;
-    if (maxTile < 128) p4 = 0.10;
-    else if (maxTile < 512) p4 = 0.15;
-    else if (maxTile < 2048) p4 = 0.20;
-    else p4 = 0.25;
-    return Math.random() < p4 ? 4 : 2;
+    // 收集盘面信息
+    var counts = {}, totalTiles = 0;
+    for (var r = 0; r < ROWS; r++) {
+      for (var c = 0; c < COLS; c++) {
+        if (board[r][c]) {
+          counts[board[r][c].v] = (counts[board[r][c].v] || 0) + 1;
+          totalTiles++;
+        }
+      }
+    }
+
+    // 确定可生成的数字范围（随最高数字渐进解锁）
+    var candidates = [2, 4];                 // 始终可生成
+    if (maxTile >= 32)  candidates.push(8);
+    if (maxTile >= 128) candidates.push(16);
+    if (maxTile >= 256) candidates.push(32);
+    if (maxTile >= 512) candidates.push(64);
+
+    // 基础概率分布：2 始终最高，但整体曲线更陡（难度更高）
+    // 随 maxTile 增大，概率曲线右移更快（大数字更早变多）
+    var baseWeights = { 2: 35, 4: 28, 8: 18, 16: 12, 32: 5, 64: 2 };
+
+    // 根据 maxTile 调整：越高则大数字基础权重越大（更早解锁大数字）
+    var shift = 0;
+    if (maxTile >= 32)  shift = 1;   // 32就提前解锁8的权重
+    if (maxTile >= 64)  shift = 2;
+    if (maxTile >= 128) shift = 3;
+    if (maxTile >= 256) shift = 4;
+    if (maxTile >= 512) shift = 5;
+
+    var weights = {};
+    for (var i = 0; i < candidates.length; i++) {
+      var v = candidates[i];
+      var w = baseWeights[v] || 1;
+
+      // 进度越高，大数字权重提升
+      var idx = candidates.indexOf(v);
+      w = Math.max(1, w + (idx - 0) * shift * 2);
+
+      // 盘面影响（轻度）：如果这个数字在盘面上存在，小幅提升概率
+      // 使用平方根抑制，避免某个数字过多时完全垄断
+      if (counts[v]) {
+        w += Math.sqrt(counts[v]) * 3;  // 平方根抑制：2个+4.2，4个+6，8个+8.5
+      }
+
+      // 连锁激励：盘面上恰好有 2 个相邻可能时，略微提升
+      // （但不强制，保持随机性）
+      if (counts[v] >= 2 && counts[v] <= 4) {
+        w *= 1.2;
+      }
+
+      // 2 的数字永远不低于 30%，保证游戏可玩性
+      if (v === 2) w = Math.max(w, 30);
+
+      weights[v] = w;
+    }
+
+    // 加权随机选择
+    var totalW = 0;
+    for (var v in weights) totalW += weights[v];
+
+    var r = Math.random() * totalW;
+    var cum = 0;
+    for (var i = 0; i < candidates.length; i++) {
+      var v = candidates[i];
+      cum += weights[v];
+      if (r <= cum) return v;
+    }
+
+    return 2; // 兜底
   }
 
   /* ===== 静态渲染 ===== */
@@ -494,17 +579,20 @@
     if (curTile && curTile.el && phase === 'resolving') curTile.el.remove();
     cur = next;
     next = genTile();
-    fc = START_COL;                   // 始终在中间列出
+    fc = START_COL;
     if (board[0][fc] === null) { fr = 0; fy = 0; }
-    else { fr = -1; fy = 0; }         // 该列顶满（Game Over 前）→ 直接贴顶合并
+    else { fr = -1; fy = 0; }
     curTile = { v: cur, el: null };
     newTileEl(curTile, 0, fc);
     curTile.el.style.boxShadow = '0 5px 14px rgba(0,0,0,0.3)';
     renderNext();
     updateHUD();
     if (checkGameOver()) { endGame(); return; }
-    phase = 'falling';
-    placeFall(true);
+    // 新数字在顶部停留一段时间，等合并动画完全结束后再开始下落
+    setTimeout(function () {
+      phase = 'falling';
+      placeFall(true);
+    }, 300);
     saveGame();
   }
 
@@ -697,7 +785,6 @@
       else if (k === 'ArrowDown' || k === 's' || k === 'S') { e.preventDefault(); softDrop = true; }
       else if (k === ' ') { e.preventDefault(); if (!e.repeat) hardDrop(); }
       else if (k >= '1' && k <= '8') { dropIntoColumn(parseInt(k, 10) - 1); }
-      else if (k === 'p' || k === 'P') togglePause();
       else if (k === 'n' || k === 'N') newGame();
       else if (k === '+' || k === '=') zoomIn();
       else if (k === '-' || k === '_') zoomOut();
@@ -763,6 +850,7 @@
     overOv = $('overOverlay');
 
     best = parseInt(store.get(BEST_KEY) || '0', 10) || 0;
+    soundOn = (localStorage.getItem('drop2048.sound') || '1') === '1';
 
     board = [];
     for (var r = 0; r < ROWS; r++) board.push(new Array(COLS).fill(null));
@@ -776,8 +864,17 @@
       renderNext();
 
       if (!tryResume()) newGame();
-      startMusic();
       bindEvents();
+      // 首次交互后启动音频（解决浏览器自动播放限制）
+      var startAudio = function () {
+        resumeAudioOnGesture();
+        document.removeEventListener('click', startAudio);
+        document.removeEventListener('touchstart', startAudio);
+        document.removeEventListener('keydown', startAudio);
+      };
+      document.addEventListener('click', startAudio);
+      document.addEventListener('touchstart', startAudio);
+      document.addEventListener('keydown', startAudio);
       requestAnimationFrame(frame);
     });
   }
