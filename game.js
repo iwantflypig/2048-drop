@@ -12,11 +12,11 @@
   var ROWS = 7;
   var COLS = 8;
   var TARGETS = [128, 256, 512, 1024, 2048, 4096, 8192];
-  var FALL_MS = 250;      // 自动下落一格（像一直按着↓键）
-  var SOFT_MS = 180;      // 按住↓加速（比自动稍快）
+  var FALL_MS = 800;      // 自动下落一格（从容节奏）
+  var SOFT_MS = 120;      // 按住↓加速（≈6倍速）
   var SAVE_KEY = 'drop2048.save';
   var BEST_KEY = 'drop2048.best';
-  var START_COL = 3;
+  var START_COL = 3;      // 始终在第4列（中间列）生成
   var SPEED = 1;          // 动画速度倍率（测试时可调快）
 
   /* ===== 状态 ===== */
@@ -409,17 +409,15 @@
   }
 
   function spawnNext() {
-    // 看门狗兜底可能残留的旧下落方块
+    // 看门狗兜底
     if (curTile && curTile.el && phase === 'resolving') curTile.el.remove();
     cur = next;
     next = genTile();
-    var sc = openSpawnCol();
-    if (sc < 0) { endGame(); return; }
-    fc = sc;
-    if (board[0][sc] === null) { fr = 0; fy = 0; }
-    else { fr = -1; fy = 0; }            // 顶部可合并列：直接出现在顶行
+    fc = START_COL;                   // 始终在中间列出
+    if (board[0][fc] === null) { fr = 0; fy = 0; }
+    else { fr = -1; fy = 0; }         // 该列顶满（Game Over 前）→ 直接贴顶合并
     curTile = { v: cur, el: null };
-    newTileEl(curTile, Math.max(fr, 0), fc);  // 直接出现在最顶行
+    newTileEl(curTile, 0, fc);
     curTile.el.style.boxShadow = '0 5px 14px rgba(0,0,0,0.3)';
     renderNext();
     updateHUD();
@@ -430,8 +428,10 @@
   }
 
   function checkGameOver() {
-    for (var c = 0; c < COLS; c++) if (colOpen(c)) return false;
-    return true;
+    for (var c = 0; c < COLS; c++) {
+      if (board[0][c] !== null) return true;  // 任意一列顶行被堵 → Game Over
+    }
+    return false;
   }
 
   function endGame() {
