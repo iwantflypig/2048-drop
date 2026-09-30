@@ -1,9 +1,10 @@
 /* ============================================================
  * 2048 Drop — 俄罗斯方块式下落合并 2048
  * - 数字顶部生成，自动下落，过程中可左右移动 / 加速 / 直落
- * - 落地后与下方相同数字合并，**无限连锁**直至不能合并
+ * - 落地后与相邻相同数字合并，**无限连锁**直至不能合并
  * - 方块用持久化 DOM + CSS 过渡，移动全程动画流畅
- * - 满列但顶部数字相同 → 仍可落入并合并（救活机制）
+ * - 任何一列堆到顶（连锁结算后仍未消除）→ Game Over；
+ *   落到顶格一瞬触发的连锁消除可以救场
  * ============================================================ */
 (function () {
   'use strict';
@@ -11,7 +12,6 @@
   /* ===== 常量 ===== */
   var ROWS = 8;
   var COLS = 7;
-  var TARGETS = [128, 256, 512, 1024, 2048, 4096, 8192];
   var FALL_MS = 600;      // 自动下落一格
   var SOFT_MS = 90;       // 按住↓加速（≈7倍速）
   var SAVE_KEY = 'drop2048.save';
@@ -150,9 +150,8 @@
 
   /* ===== 棋盘判定 ===== */
   function colOpen(c) {
-    // 列可进入：顶部为空，或顶部数字与当前相同（可合并救活）
-    var top = board[0][c];
-    return top === null || top.v === cur;
+    // 列可进入：顶部为空（任何一列到顶即已判负，不存在"满列进入"）
+    return board[0][c] === null;
   }
   function canGo(r, c) {
     if (c < 0 || c >= COLS) return false;
@@ -181,58 +180,56 @@
     return el;
   }
 
-  /* ===== 智能数字生成（难度渐进 + 盘面分析 + 随机性）===== */
+  /* ===== 智能数字生成 v2：上限封顶 + 几何衰减 + 盘面感知 + 危险自救 =====
+   * 设计原则（400 局蒙特卡洛对比调参，见提交说明）：
+   *  1) 生成上限 ≤ maxTile —— 绝不发盘面肯定配不上对的"死块"
+   *     （旧版上限≈2×maxTile 且开局就发 4，平均 244 步即死）
+   *  2) 小数字为主，概率按级别几何衰减（每升一级 ×0.50）
+   *  3) 盘面上已有同类 → 加权（当场可消，爽感）；堆积过量 → 抑制；
+   *     盘上没有的高值 → 强抑制（大概率死块）
+   *  4) 盘面堆进危险线 → 收窄上限并偏向小数字，给玩家自救空间
+   */
   function genTile() {
-    // 1. 统计盘面数字分布
+    // 1. 盘面统计：数字分布 + 最高列
     var counts = {};
+    var maxH = 0;
     for (var r = 0; r < ROWS; r++) {
       for (var c = 0; c < COLS; c++) {
-        if (board[r][c]) {
-          counts[board[r][c].v] = (counts[board[r][c].v] || 0) + 1;
-        }
+        var bt = board[r][c];
+        if (bt) counts[bt.v] = (counts[bt.v] || 0) + 1;
       }
     }
+    for (var c2 = 0; c2 < COLS; c2++) maxH = Math.max(maxH, colHeight(c2));
+    var danger = maxH >= ROWS - 2;
 
-    // 2. 确定难度值和候选数字
-    var difficulty = Math.log2(maxTile + 4);  // maxTile=0→2, maxTile=8→3.3, maxTile=32→5.1, maxTile=128→7
-    var maxLevel = Math.ceil(difficulty);     // 最大数字的幂次
+    // 2. 可生成上限：maxTile=0/2→只有2；8→{2,4,8}；16→{2..16}……2048→封顶256
+    //    发 maxTile 级别时若盘上有搭档（×2.4 奖励）即是"配对翻倍"的爽点
+    var L = maxTile >= 2 ? Math.round(Math.log2(maxTile)) : 1;
+    var U = Math.max(1, Math.min(8, L));
+    if (danger) U = Math.max(1, U - 1);   // 危险时收窄，不发大数
 
-    var candidates = [];
-    for (var level = 1; level <= maxLevel; level++) {
-      candidates.push(Math.pow(2, level));
-    }
-
-    // 3. 计算每个候选的权重
-    var totalW = 0;
-    var weights = [];
-
-    for (var i = 0; i < candidates.length; i++) {
-      var cand = candidates[i];
-      var level = i + 1;  // 2→1, 4→2, 8→3, 16→4, 32→5...
-
-      // 核心：权重 = 难度 - 级别 + 1（数字越大权重越低但不为0）
-      var w = Math.max(1, difficulty - level + 1);
-
-      // 盘面修正
-      if (counts[cand] >= 2) w *= 1.4;   // 有合并潜力，提升
-      if (counts[cand] >= 4) w *= 0.5;   // 过多堆积，抑制
-
-      // 链条修正：盘面有 cand*2 时，说明玩家在构建大数字，多出 cand
-      if (cand >= 4 && counts[cand * 2] >= 1) w *= 1.5;
-
-      weights[i] = w;
+    // 3. 权重：几何衰减为底，再做盘面修正
+    var totalW = 0, weights = [];
+    for (var i = 1; i <= U; i++) {
+      var v = 1 << i;
+      var w = Math.pow(0.50, i - 1);
+      var cnt = counts[v] || 0;
+      if (cnt >= 1) w *= 2.4;                              // 有现成搭档 → 奖励
+      if (cnt >= 4) w *= 0.45;                             // 供应过量 → 抑制
+      if (cnt === 0 && i >= 3) w *= 0.3;                   // 高值盘上没有 → 大概率死块
+      if (i >= 2 && (counts[v * 2] || 0) >= 1) w *= 1.35;  // 在堆 v*2 → 补 v 能接链
+      if (danger) w *= (i <= 2 ? 1.6 : 0.55);              // 危险 → 偏向小数字
+      weights.push(w);
       totalW += w;
     }
 
-    // 4. 加权随机选择
-    var r = Math.random() * totalW;
-    var cum = 0;
-    for (var i = 0; i < candidates.length; i++) {
-      cum += weights[i];
-      if (r <= cum) return candidates[i];
+    // 4. 加权随机
+    var x = Math.random() * totalW, cum = 0;
+    for (var j = 0; j < weights.length; j++) {
+      cum += weights[j];
+      if (x <= cum) return 2 << j;
     }
-
-    return 2; // 兜底
+    return 2;
   }
 
   /* ===== 静态渲染 ===== */
@@ -358,15 +355,13 @@
     land(fr);
   }
 
-  // 点击列 = 明确指令：跳到该列顶部再直落
+  // 点击列 = 明确指令：跳到该列顶部再直落（满列不可进：任何一列到顶即判负）
   function dropIntoColumn(col) {
     if (phase !== 'falling' || !curTile) return;
     if (col < 0 || col >= COLS) return;
-    var top = board[0][col];
-    if (top !== null && top.v !== curTile.v) return;  // 该列不可进入
+    if (board[0][col] !== null) return;  // 该列已到顶
     fc = col;
-    fr = (board[0][fc] !== null) ? -1 : 0;  // 满顶可合并列 → 从顶贴入
-    fy = fr;
+    fr = 0; fy = 0;
     placeFall(true);
     hardDrop();
   }
@@ -393,12 +388,15 @@
       el.classList.add('land');
       setTimeout(function () { if (alive(id)) el.classList.remove('land'); }, 220 * SPEED);
     } else {
-      // 满列合并进入：t 贴在顶行，与顶行方块重叠并合并
-      board[0][col] = t;
+      // 防御分支：满列进入已被规则禁止（任何一列到顶即判负），正常流程不可达
       row = 0;
+      var old = board[0][col];
+      if (old && old.el) old.el.remove();   // 不留僵尸元素
+      board[0][col] = t;
       el.style.transition = 'none';
       el.style.zIndex = 6;
       setBox(el, rect(0, col));
+      refreshTileEl(t);
     }
     updateHUD();
     updateDanger();
@@ -535,8 +533,8 @@
   function chainError(e, id) {
     if (!alive(id)) return;
     console.error('merge chain error:', e);
-    if (checkGameOver()) endGame();
-    else spawnNext();
+    runId++;
+    spawnNext();   // spawnNext 内部会用新的 cur 做正确的 Game Over 判定
   }
 
   function onMaxTile(v) {
@@ -548,16 +546,21 @@
   }
 
   /* ===== 生成下一个 / 游戏结束 ===== */
-  function openSpawnCol() {
-    // 优先 START_COL，找顶部为空的列；退而求其次找顶部可合并的列
-    var mergeCol = -1;
-    for (var d = 0; d < COLS; d++) {
-      var c1 = START_COL + Math.ceil(d / 2) * (d % 2 ? 1 : -1);
-      if (c1 < 0 || c1 >= COLS) continue;
-      if (board[0][c1] === null) return c1;
-      if (mergeCol < 0 && board[0][c1].v === cur) mergeCol = c1;
-    }
-    return mergeCol; // -1 = 彻底无路（Game Over）
+  // 把当前方块放到出生列（spawnNext / loadState / newGame 共用）
+  function placeSpawn() {
+    if (checkGameOver()) { endGame(); return false; }
+    fc = START_COL;                        // 未结束时顶行必然全空，固定中间列出
+    fr = 0; fy = 0;
+    curTile = { v: cur, el: null };
+    newTileEl(curTile, 0, fc);
+    curTile.el.style.boxShadow = '0 5px 14px rgba(0,0,0,0.3)';
+    renderNext();
+    updateHUD();
+    updateDanger();
+    phase = 'falling';
+    placeFall(true);
+    saveGame();
+    return true;
   }
 
   function spawnNext() {
@@ -565,28 +568,18 @@
     if (curTile && curTile.el && phase === 'resolving') curTile.el.remove();
     cur = next;
     next = genTile();
-    fc = START_COL;
-    if (board[0][fc] === null) { fr = 0; fy = 0; }
-    else { fr = -1; fy = 0; }
-    curTile = { v: cur, el: null };
-    newTileEl(curTile, 0, fc);
-    curTile.el.style.boxShadow = '0 5px 14px rgba(0,0,0,0.3)';
-    renderNext();
-    updateHUD();
-    if (checkGameOver()) { endGame(); return; }
-    phase = 'falling';
-    placeFall(true);
-    saveGame();
+    placeSpawn();
   }
 
   function checkGameOver() {
     for (var c = 0; c < COLS; c++) {
-      if (board[0][c] !== null) return true;  // 任意一列顶行被堵 → Game Over
+      if (board[0][c] !== null) return true;   // 任何一列堆到顶（结算后仍在）→ Game Over
     }
     return false;
   }
 
   function endGame() {
+    runId++;                               // 掐掉所有挂起回调，防止结束后再生成方块
     phase = 'over';
     if (curTile && curTile.el) curTile.el.style.display = 'none';
     curTile = null;
@@ -597,7 +590,7 @@
     $('finalScore').textContent = score;
     $('finalMax').textContent = maxTile;
     $('overTitle').textContent = reached['2048'] ? '2048 已达成' : 'GAME OVER';
-    $('overMsg').textContent = '没有可以落入的列了';
+    $('overMsg').textContent = '有数字堆到顶了';
     overOv.classList.add('on');
     updateHUD();
     store.del(SAVE_KEY);
@@ -614,17 +607,12 @@
     cur = genTile();
     next = genTile();
     softDrop = false;
-549|    overOv.classList.remove('on');
+    overOv.classList.remove('on');
     comboEl.textContent = '';
     updateHUD();
     renderNext();
-    fc = START_COL;
-    fr = 0; fy = 0;                       // 直接出现在最顶行
-    curTile = { v: cur, el: null };
-    newTileEl(curTile, 0, fc);
-    phase = 'falling';
+    placeSpawn();
     lastChainTick = Date.now();
-    placeFall(true);
     store.del(SAVE_KEY);
   }
 
@@ -663,18 +651,10 @@
     maxTile = state.maxTile | 0;
     cur = state.cur || 2; next = state.next || genTile();
     reached = state.reached || {};
-    fc = START_COL;
-    fr = 0; fy = 0;                       // 直接出现在最顶行
-    curTile = { v: cur, el: null };
-    newTileEl(curTile, 0, fc);
-    phase = 'falling';
-    lastChainTick = Date.now();
-    renderNext();
     updateHUD();
     updateDanger();
-    if (checkGameOver()) { endGame(); return false; }
-    placeFall(true);
-    return true;
+    lastChainTick = Date.now();
+    return placeSpawn();   // 死档时 placeSpawn 内部走 endGame（结算弹窗）
   }
 
   function tryResume() {
@@ -726,11 +706,22 @@
       if (Date.now() - lastChainTick > 2500) {
         console.warn('merge chain watchdog fired, forcing recovery');
         runId++;                       // 掐掉所有挂起的链回调
-        if (checkGameOver()) { endGame(); }
-        else { phase = 'falling'; spawnNext(); }
+        spawnNext();                   // 内部含正确的 Game Over 判定
       }
     }
     requestAnimationFrame(frame);
+  }
+
+  /* ===== 暂停（仅下落阶段；主循环按 phase 跳过物理更新） ===== */
+  function togglePause() {
+    if (phase === 'falling') {
+      phase = 'paused';
+      softDrop = false;
+      popup('⏸ 已暂停');
+    } else if (phase === 'paused') {
+      phase = 'falling';
+      popup('▶ 继续');
+    }
   }
 
   /* ===== 事件 ===== */
@@ -767,7 +758,8 @@
       else if (k === 'ArrowRight' || k === 'd' || k === 'D') { e.preventDefault(); moveH(1); }
       else if (k === 'ArrowDown' || k === 's' || k === 'S') { e.preventDefault(); softDrop = true; }
       else if (k === ' ') { e.preventDefault(); if (!e.repeat) hardDrop(); }
-      else if (k >= '1' && k <= '8') { dropIntoColumn(parseInt(k, 10) - 1); }
+      else if (k >= '1' && k <= String(COLS)) { dropIntoColumn(parseInt(k, 10) - 1); }
+      else if (k === 'p' || k === 'P') { e.preventDefault(); togglePause(); }
       else if (k === 'n' || k === 'N') newGame();
       else if (k === '+' || k === '=') zoomIn();
       else if (k === '-' || k === '_') zoomOut();
@@ -876,6 +868,7 @@
     moveRight: function () { moveH(1); },
     dropIntoColumn: dropIntoColumn,
     _setSpeed: function (s) { SPEED = s; },
+    _gen: genTile,
     _load: function (state) { return loadState(state); },
     get board() {
       // 返回数值棋盘，便于测试断言
